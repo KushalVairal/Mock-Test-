@@ -10,7 +10,7 @@ const MODEL = 'llama-3.3-70b-versatile';
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 module.exports = async function handler(req, res) {
-  // CORS headers (safe to keep even if you deploy on the same domain)
+  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -49,10 +49,17 @@ This is question #${qNum} in a fresh practice set -- make it meaningfully differ
 Respond with STRICT JSON ONLY, matching exactly this shape:
 {"question": "string", "options": ["string", "string", "string", "string"], "correct": 0, "solution": "string"}
 
-Rules:
+Rules for LaTeX:
+- If you need math, wrap it in single $...$ for inline or $$...$$ for display.
+- Always use proper LaTeX syntax: e.g., $x^2$, $\frac{1}{2}$, $\sqrt{3}$, $\alpha$, $\beta$.
+- NEVER use unescaped backslashes or commands outside $...$ delimiters.
+- For simple fractions, write $\frac{a}{b}$ with braces exactly like that.
+- Do NOT use \\text inside math unless absolutely necessary; keep it plain.
+
+Other rules:
 - "options" must contain exactly 4 distinct, plausible answer choices in random order.
 - "correct" is the zero-based index (0-3) of the correct option within "options".
-- "solution" must be a brief, clear explanation of why the correct answer is right (2-4 sentences, may include LaTeX inside $...$ if helpful).
+- "solution" must be a brief, clear explanation of why the correct answer is right (2-4 sentences, may include LaTeX if helpful).
 - The question and answer must be factually accurate and appropriate for a serious exam candidate preparing for "${topic}".
 - Do not reveal or hint at the answer inside the question text.
 - Output raw JSON only, nothing else.`;
@@ -72,7 +79,7 @@ Rules:
         ],
         temperature: 0.9,
         max_tokens: 500,
-        response_format: { type: 'json_object' }  // helps Groq output pure JSON
+        response_format: { type: 'json_object' }
       })
     });
 
@@ -118,7 +125,7 @@ Rules:
       parsed.options.every(o => typeof o === 'string' && o.trim()) &&
       typeof parsed.correct === 'number' &&
       parsed.correct >= 0 && parsed.correct <= 3 &&
-      typeof parsed.solution === 'string' && parsed.solution.trim();   // ← NEW CHECK
+      typeof parsed.solution === 'string' && parsed.solution.trim();
 
     if (!valid) {
       res.status(502).json({ error: 'Groq returned an unexpected question format.' });
@@ -130,7 +137,7 @@ Rules:
       question: parsed.question,
       options: parsed.options,
       correct: parsed.correct,
-      solution: parsed.solution   // ← NOW INCLUDED
+      solution: parsed.solution
     });
 
   } catch (err) {
