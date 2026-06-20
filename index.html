@@ -240,6 +240,16 @@
   .results-table td:last-child{ text-align:right; font-family:'IBM Plex Mono', monospace; font-weight:600; }
   .results-table tr:last-child td{ border-bottom:none; }
 
+  /* Answer review list */
+  .answer-review{ text-align:left; margin-top:24px; }
+  .review-item{ border:1px solid var(--border); border-radius:8px; padding:18px; margin-bottom:16px; background:#FAFBF9; }
+  .review-item .question-title{ font-weight:600; margin-bottom:10px; font-size:16px; line-height:1.4; }
+  .review-item .answer-detail{ font-size:14px; margin:6px 0; display:flex; gap:8px; }
+  .review-item .answer-detail .label{ font-weight:600; min-width:90px; color:var(--ink-soft); }
+  .review-item .answer-detail.correct-answer{ color:var(--pass-green); }
+  .review-item .answer-detail.wrong-answer{ color:var(--stamp-red); }
+  .review-item .solution{ margin-top:10px; font-size:14px; background:#F0F4ED; padding:10px; border-radius:6px; border-left:3px solid var(--pass-green); }
+
   .error-banner{
     background:#FBEAEA; border:1px solid var(--stamp-red); color:#7A2424;
     border-radius:8px; padding:12px 14px; font-size:13.5px; margin-bottom:18px;
@@ -255,10 +265,24 @@
     .timer{ align-self:flex-end; }
   }
 </style>
+<!-- MathJax for beautiful math rendering -->
+<script>
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      processEscapes: true
+    },
+    options: {
+      ignoreHtmlClass: 'no-mathjax',
+      processHtmlClass: 'mathjax-process'
+    }
+  };
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
 </head>
 <body>
 
-<!-- SVG filter used to give bubble fills and the result stamp an irregular, hand-marked edge -->
+<!-- SVG filter for hand-drawn effect -->
 <svg width="0" height="0" style="position:absolute">
   <filter id="pencil-fill">
     <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="noise"/>
@@ -270,11 +294,11 @@
   <header class="masthead">
     <span class="masthead-tag">FORM 7-B · MOCK EXAM</span>
     <h1>Mock Exam Hall</h1>
-    <p class="masthead-sub">Timed practice for any exam. Fresh questions, generated on the spot.</p>
+    <p class="masthead-sub">Timed practice for any exam. Fresh questions with full solutions.</p>
   </header>
 
   <main>
-    <!-- ===== Setup screen ===== -->
+    <!-- Setup Screen -->
     <section id="setup-screen" class="card admit-card">
       <p class="section-label">CANDIDATE DETAILS</p>
       <form id="setup-form">
@@ -301,7 +325,7 @@
       </form>
     </section>
 
-    <!-- ===== Test screen ===== -->
+    <!-- Test Screen -->
     <section id="test-screen" class="card exam-card hidden">
       <div class="exam-topbar">
         <div class="topbar-field"><span>Candidate</span><strong id="tb-name"></strong></div>
@@ -311,7 +335,6 @@
       </div>
 
       <div id="error-area"></div>
-
       <div id="loading" class="loading hidden">
         <div class="clock-spin"></div>
         <span>Fetching the next question…</span>
@@ -325,7 +348,7 @@
       <button id="submit-btn" class="btn btn-primary" disabled>Submit Answer</button>
     </section>
 
-    <!-- ===== Results screen ===== -->
+    <!-- Results Screen -->
     <section id="results-screen" class="card results-card hidden">
       <div class="stamp" id="score-stamp">
         <span id="score-value">0/0</span>
@@ -339,6 +362,10 @@
         <tr><td>Incorrect</td><td id="res-incorrect">0</td></tr>
         <tr><td>Skipped</td><td id="res-skipped">0</td></tr>
       </table>
+
+      <!-- Detailed answer review -->
+      <div class="answer-review" id="answer-review"></div>
+
       <button id="retry-btn" class="btn btn-primary">Take Another Test</button>
     </section>
   </main>
@@ -348,35 +375,25 @@
 (function(){
   "use strict";
 
-  // ---- Configuration -----------------------------------------------
-  // If you deploy the frontend on the SAME Vercel project as the API
-  // (recommended — see README), leave this as a relative path.
-  // If you host the frontend somewhere else (e.g. GitHub Pages),
-  // replace this with your full Vercel URL, e.g.
-  // 'https://your-app.vercel.app/api/generate-question'
   const API_URL = '/api/generate-question';
 
-  // ---- DOM refs -------------------------------------------------------
+  // DOM refs
   const setupScreen   = document.getElementById('setup-screen');
   const testScreen    = document.getElementById('test-screen');
   const resultsScreen = document.getElementById('results-screen');
-
   const setupForm   = document.getElementById('setup-form');
   const formError   = document.getElementById('form-error');
-
   const tbName     = document.getElementById('tb-name');
   const tbTopic    = document.getElementById('tb-topic');
   const tbProgress = document.getElementById('tb-progress');
   const timerBox   = document.getElementById('timer');
   const timerValue = document.getElementById('timer-value');
-
   const errorArea      = document.getElementById('error-area');
   const loadingEl      = document.getElementById('loading');
   const questionContent= document.getElementById('question-content');
   const questionText   = document.getElementById('question-text');
   const optionsList    = document.getElementById('options-list');
   const submitBtn      = document.getElementById('submit-btn');
-
   const scoreStamp   = document.getElementById('score-stamp');
   const scoreValue   = document.getElementById('score-value');
   const resultsMeta  = document.getElementById('results-meta');
@@ -384,9 +401,9 @@
   const resCorrect   = document.getElementById('res-correct');
   const resIncorrect = document.getElementById('res-incorrect');
   const resSkipped   = document.getElementById('res-skipped');
+  const answerReview = document.getElementById('answer-review');
   const retryBtn     = document.getElementById('retry-btn');
 
-  // ---- State ------------------------------------------------------
   let state = {
     name: '', topic: '', secondsPerQ: 45, totalQuestions: 10,
     currentIndex: 0, currentQuestion: null, selectedOption: null,
@@ -398,7 +415,14 @@
     screen.classList.remove('hidden');
   }
 
-  // ---- Setup form ---------------------------------------------------
+  // ---- MathJax helper ----
+  function typesetMath(el) {
+    if (window.MathJax && el) {
+      MathJax.typesetPromise([el]).catch(console.error);
+    }
+  }
+
+  // ---- Setup form ----
   setupForm.addEventListener('submit', function(e){
     e.preventDefault();
     const name = document.getElementById('candidate-name').value.trim();
@@ -436,7 +460,7 @@
     loadQuestion();
   });
 
-  // ---- Question loading ---------------------------------------------
+  // ---- Question loading ----
   async function loadQuestion(){
     if (state.currentIndex >= state.totalQuestions){
       showResults();
@@ -457,9 +481,7 @@
         body: JSON.stringify({ topic: state.topic, questionNumber: state.currentIndex + 1 })
       });
 
-      if (!res.ok){
-        throw new Error('Server responded with status ' + res.status);
-      }
+      if (!res.ok) throw new Error('Server responded with status ' + res.status);
       const data = await res.json();
 
       if (!data || typeof data.question !== 'string' || !Array.isArray(data.options) ||
@@ -481,8 +503,11 @@
     }
   }
 
+  // ---- Render question (MathJax enabled) ----
   function renderQuestion(q){
-    questionText.textContent = q.question;
+    questionText.innerHTML = q.question;
+    typesetMath(questionText);
+
     optionsList.innerHTML = '';
     q.options.forEach(function(optText, idx){
       const btn = document.createElement('button');
@@ -496,14 +521,16 @@
 
       const label = document.createElement('span');
       label.className = 'option-text';
-      label.textContent = optText;
+      label.innerHTML = optText;
 
       btn.appendChild(bubble);
       btn.appendChild(label);
       btn.addEventListener('click', function(){ selectOption(idx); });
       optionsList.appendChild(btn);
     });
+
     submitBtn.disabled = true;
+    typesetMath(optionsList);
   }
 
   function selectOption(idx){
@@ -517,7 +544,7 @@
     submitBtn.disabled = false;
   }
 
-  // ---- Timer ----------------------------------------------------------
+  // ---- Timer ----
   function startTimer(){
     state.timeLeft = state.secondsPerQ;
     updateTimerDisplay();
@@ -526,7 +553,7 @@
       updateTimerDisplay();
       if (state.timeLeft <= 0){
         clearTimer();
-        recordAnswer(null); // timed out -> skipped
+        recordAnswer(null);
         nextQuestion();
       }
     }, 1000);
@@ -544,7 +571,7 @@
     }
   }
 
-  // ---- Answer handling --------------------------------------------
+  // ---- Answer handling ----
   submitBtn.addEventListener('click', function(){
     if (state.selectedOption === null) return;
     clearTimer();
@@ -561,8 +588,10 @@
 
     state.answers.push({
       question: q.question,
+      options: q.options,
       selected: selectedIdx,
       correct: q.correct,
+      solution: q.solution || '',
       status: status
     });
   }
@@ -572,16 +601,14 @@
     loadQuestion();
   }
 
-  // ---- Error handling --------------------------------------------
+  // ---- Error handling ----
   function handleFetchError(err){
     console.error(err);
-    errorArea.innerHTML = '<div class="error-banner">' +
-      'We couldn\'t load the next question from the AI service. The test will end here so your progress is saved.' +
-      '</div>';
+    errorArea.innerHTML = '<div class="error-banner">We couldn\'t load the next question from the AI service. The test will end here so your progress is saved.</div>';
     setTimeout(function(){ showResults(); }, 1800);
   }
 
-  // ---- Results ------------------------------------------------------
+  // ---- Results (with detailed review) ----
   function showResults(){
     clearTimer();
     const total = state.answers.length;
@@ -599,6 +626,53 @@
     const passed = total > 0 && (correct / total) >= 0.5;
     scoreStamp.classList.remove('pass', 'fail');
     scoreStamp.classList.add(passed ? 'pass' : 'fail');
+
+    // Build detailed review
+    answerReview.innerHTML = '';
+    state.answers.forEach(function(ans, idx){
+      const div = document.createElement('div');
+      div.className = 'review-item';
+
+      // Question number and text
+      const qTitle = document.createElement('div');
+      qTitle.className = 'question-title';
+      qTitle.innerHTML = (idx + 1) + '. ' + ans.question;
+      div.appendChild(qTitle);
+
+      // Selected answer
+      const selectedDiv = document.createElement('div');
+      selectedDiv.className = 'answer-detail';
+      if (ans.status === 'skipped') {
+        selectedDiv.classList.add('wrong-answer');
+        selectedDiv.innerHTML = '<span class="label">Your answer:</span> Not answered (timed out)';
+      } else {
+        const selectedClass = ans.status === 'correct' ? 'correct-answer' : 'wrong-answer';
+        selectedDiv.classList.add(selectedClass);
+        selectedDiv.innerHTML = '<span class="label">Your answer:</span> ' + 
+          String.fromCharCode(65 + ans.selected) + '. ' + ans.options[ans.selected];
+      }
+      div.appendChild(selectedDiv);
+
+      // Correct answer
+      const correctDiv = document.createElement('div');
+      correctDiv.className = 'answer-detail correct-answer';
+      correctDiv.innerHTML = '<span class="label">Correct answer:</span> ' + 
+        String.fromCharCode(65 + ans.correct) + '. ' + ans.options[ans.correct];
+      div.appendChild(correctDiv);
+
+      // Solution
+      if (ans.solution) {
+        const solDiv = document.createElement('div');
+        solDiv.className = 'solution';
+        solDiv.innerHTML = '<strong>Solution:</strong> ' + ans.solution;
+        div.appendChild(solDiv);
+      }
+
+      answerReview.appendChild(div);
+    });
+
+    // Trigger MathJax for any math in the review
+    typesetMath(answerReview);
 
     show(resultsScreen);
   }
