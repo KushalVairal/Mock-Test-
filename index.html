@@ -415,10 +415,22 @@
     screen.classList.remove('hidden');
   }
 
-  // ---- MathJax helper ----
+  // ---- MathJax helper with fallback (fixes "Math input error") ----
   function typesetMath(el) {
     if (window.MathJax && el) {
-      MathJax.typesetPromise([el]).catch(console.error);
+      MathJax.typesetPromise([el])
+        .then(() => {
+          // Success – nothing to do
+        })
+        .catch((err) => {
+          // On error, convert all MathJax error spans back to raw text
+          console.warn('MathJax failed on some element, showing raw text:', err);
+          if (el.querySelectorAll) {
+            el.querySelectorAll('.MathJax_Error').forEach(span => {
+              span.replaceWith(span.textContent); // show the LaTeX source
+            });
+          }
+        });
     }
   }
 
