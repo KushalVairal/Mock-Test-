@@ -2,7 +2,7 @@
 
 A free, AI-powered mock test app. Enter any exam topic (e.g. "UPSC Polity",
 "IBPS SO IT Officer", "NEET Biology") and it generates fresh multiple-choice
-questions on the fly using Google's free Gemini API.
+questions on the fly using Groq's free, fast inference API (Llama 3.3 70B).
 
 ```
 ai-mock-test/
@@ -19,20 +19,22 @@ Pages step. That's what these steps walk through.
 
 ---
 
-## 1. Get a free Gemini API key
+## 1. Get a free Groq API key
 
-1. Go to [Google AI Studio](https://aistudio.google.com/apikey).
-2. Click **Create API Key**. No credit card required.
-3. Copy the key somewhere safe — you'll paste it into Vercel in step 3.
+1. Go to [console.groq.com](https://console.groq.com) and sign up. No credit
+   card required.
+2. Open **API Keys** in the left sidebar and click **Create API Key**.
+3. Copy the key (starts with `gsk_...`) somewhere safe — you'll paste it
+   into Vercel in step 3.
 
-Free-tier quotas change over time (they were cut back in Dec 2025), so treat
-any specific numbers as approximate. Check
-[ai.google.dev/gemini-api/docs/rate-limits](https://ai.google.dev/gemini-api/docs/rate-limits)
-for current limits. As of mid-2026, `gemini-2.5-flash` (used in this project)
-gets roughly 10 requests/minute and a few hundred requests/day for free —
-plenty for personal or classroom use. If you outgrow it, open
-`api/generate-question.js` and change `MODEL` to `gemini-2.5-flash-lite` for
-a higher daily limit.
+Free-tier quotas change over time, so treat any specific numbers as
+approximate. Check
+[console.groq.com/docs/rate-limits](https://console.groq.com/docs/rate-limits)
+for current limits. As of mid-2026, `llama-3.3-70b-versatile` (used in this
+project) gets roughly 30,000 tokens/minute and ~14,400 requests/day for
+free — plenty for personal or classroom use. If you outgrow it or want
+faster responses, open `api/generate-question.js` and change `MODEL` to
+`llama-3.1-8b-instant`.
 
 ## 2. Push the project to GitHub
 
@@ -59,7 +61,7 @@ git push -u origin main
    `api/generate-question.js` as a serverless function — no build
    configuration needed.
 4. Before deploying, open **Environment Variables** and add:
-   - **Name:** `GEMINI_API_KEY`
+   - **Name:** `GROQ_API_KEY`
    - **Value:** the key you copied in step 1
 5. Click **Deploy**. After a minute you'll get a live URL like
    `https://ai-mock-test-yourname.vercel.app`.
@@ -76,7 +78,7 @@ vercel dev
 ```
 
 This runs the same setup locally (usually at `http://localhost:3000`) using
-a `.env.local` file for `GEMINI_API_KEY` instead of Vercel's dashboard.
+a `.env.local` file for `GROQ_API_KEY` instead of Vercel's dashboard.
 
 ## 5. (Optional) Host the frontend somewhere else
 
@@ -105,7 +107,7 @@ setup in steps 1–3 is simpler.
 
 - Nothing is stored server-side — each question is generated fresh and
   answers live only in the browser tab for the duration of the test.
-- If Gemini's response can't be parsed as valid JSON, the function returns a
+- If Groq's response can't be parsed as valid JSON, the function returns a
   502 with an error message rather than guessing; the frontend then ends the
   test gracefully and shows whatever results were collected so far.
 - To change the pass/fail threshold on the results screen, edit the `0.5`

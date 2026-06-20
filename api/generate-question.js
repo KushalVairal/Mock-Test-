@@ -2,16 +2,18 @@
 // Vercel serverless function. Accepts POST { topic, questionNumber }
 // and returns { question, options: [4 strings], correct: 0-3 }.
 //
-// Requires the environment variable GEMINI_API_KEY to be set in your
+// Uses Groq's free, fast inference API (Llama 3.3 70B) instead of Google
+// Gemini. Requires the environment variable GROQ_API_KEY to be set in your
 // Vercel project settings (Project -> Settings -> Environment Variables).
 
-// "gemini-2.5-flash" is a good balance of quality and free-tier quota as of
-// 2026. If you need a higher daily request limit and don't mind slightly
-// simpler questions, swap this to "gemini-2.5-flash-lite". Free-tier quotas
-// change over time -- check https://ai.google.dev/gemini-api/docs/rate-limits
-// if you start seeing 429 errors.
-const MODEL = 'gemini-2.5-flash';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+// "llama-3.3-70b-versatile" is Groq's best general-purpose free model as of
+// 2026 -- strong quality, generous free tier (~30k tokens/min, ~14,400
+// requests/day, shared across your account). If you hit rate limits, swap
+// this to the smaller/faster "llama-3.1-8b-instant". Quotas change over
+// time -- check https://console.groq.com/docs/rate-limits if you start
+// seeing 429 errors.
+const MODEL = 'llama-3.3-70b-versatile';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 module.exports = async function handler(req, res) {
   // Allow the frontend to call this even if it's hosted on a different
@@ -38,17 +40,21 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    res.status(500).json({ error: 'Server misconfigured: GEMINI_API_KEY is not set.' });
+    res.status(500).json({ error: 'Server misconfigured: GROQ_API_KEY is not set.' });
     return;
   }
 
   const qNum = Number.isFinite(questionNumber) ? questionNumber : 1;
 
-  const prompt = `You are an exam question generator for the topic: "${topic}".
-Generate ONE multiple-choice question (this is question #${qNum} in a fresh practice set -- make it different from a typical first question, and do not repeat common textbook examples every time).
-Respond with STRICT JSON ONLY. No markdown formatting, no code fences, no commentary before or after -- just the raw JSON object, matching exactly this shape:
+  const systemPrompt = 'You are a strict JSON API for an exam question generator. ' +
+    'You only ever respond with a single raw JSON object -- no markdown, no code fences, no commentary.';
+
+  const userPrompt = `Generate ONE multiple-choice question for the exam topic: "${topic}".
+This is question #${qNum} in a fresh practice set -- make it meaningfully different from a typical first question, and avoid repeating the most common textbook example every time.
+
+Respond with STRICT JSON ONLY, matching exactly this shape:
 {"question": "string", "options": ["string", "string", "string", "string"], "correct": 0}
 
 Rules:
@@ -59,34 +65,42 @@ Rules:
 - Output raw JSON only, nothing else.`;
 
   try {
-    const upstream = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+    const upstream = await fetch(GROQ_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.9,
-          maxOutputTokens: 500
-        }
+        model: MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.9,
+        max_tokens: 500,
+        // Groq supports OpenAI-style JSON mode for this model -- it nudges
+        // the model to always return valid JSON. If you switch to a model
+        // that doesn't support it, just delete this line.
+        response_format: { type: 'json_object' }
       })
     });
 
     if (!upstream.ok) {
       const errText = await upstream.text();
       res.status(502).json({
-        error: 'Gemini API request failed.',
+        error: 'Groq API request failed.',
         details: errText.slice(0, 500)
       });
       return;
     }
 
     const data = await upstream.json();
-    const rawText = data && data.candidates && data.candidates[0] &&
-      data.candidates[0].content && data.candidates[0].content.parts &&
-      data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+    const rawText = data && data.choices && data.choices[0] &&
+      data.choices[0].message && data.choices[0].message.content;
 
     if (!rawText) {
-      res.status(502).json({ error: 'Gemini returned no usable content.' });
+      res.status(502).json({ error: 'Groq returned no usable content.' });
       return;
     }
 
@@ -115,7 +129,7 @@ Rules:
       parsed.correct >= 0 && parsed.correct <= 3;
 
     if (!valid) {
-      res.status(502).json({ error: 'Gemini returned an unexpected question format.' });
+      res.status(502).json({ error: 'Groq returned an unexpected question format.' });
       return;
     }
 
