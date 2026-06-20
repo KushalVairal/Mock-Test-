@@ -1,24 +1,16 @@
 // api/generate-question.js
 // Vercel serverless function. Accepts POST { topic, questionNumber }
-// and returns { question, options: [4 strings], correct: 0-3 }.
+// and returns { question, options: [4 strings], correct: 0-3, solution: string }.
 //
 // Uses Groq's free, fast inference API (Llama 3.3 70B) instead of Google
 // Gemini. Requires the environment variable GROQ_API_KEY to be set in your
 // Vercel project settings (Project -> Settings -> Environment Variables).
 
-// "llama-3.3-70b-versatile" is Groq's best general-purpose free model as of
-// 2026 -- strong quality, generous free tier (~30k tokens/min, ~14,400
-// requests/day, shared across your account). If you hit rate limits, swap
-// this to the smaller/faster "llama-3.1-8b-instant". Quotas change over
-// time -- check https://console.groq.com/docs/rate-limits if you start
-// seeing 429 errors.
 const MODEL = 'llama-3.3-70b-versatile';
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 module.exports = async function handler(req, res) {
-  // Allow the frontend to call this even if it's hosted on a different
-  // origin (e.g. GitHub Pages). Safe to remove if frontend + backend share
-  // the same Vercel project/domain.
+  // CORS headers (safe to keep even if you deploy on the same domain)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -55,11 +47,12 @@ module.exports = async function handler(req, res) {
 This is question #${qNum} in a fresh practice set -- make it meaningfully different from a typical first question, and avoid repeating the most common textbook example every time.
 
 Respond with STRICT JSON ONLY, matching exactly this shape:
-{"question": "string", "options": ["string", "string", "string", "string"], "correct": 0}
+{"question": "string", "options": ["string", "string", "string", "string"], "correct": 0, "solution": "string"}
 
 Rules:
 - "options" must contain exactly 4 distinct, plausible answer choices in random order.
 - "correct" is the zero-based index (0-3) of the correct option within "options".
+- "solution" must be a brief, clear explanation of why the correct answer is right (2-4 sentences, may include LaTeX inside $...$ if helpful).
 - The question and answer must be factually accurate and appropriate for a serious exam candidate preparing for "${topic}".
 - Do not reveal or hint at the answer inside the question text.
 - Output raw JSON only, nothing else.`;
@@ -79,10 +72,7 @@ Rules:
         ],
         temperature: 0.9,
         max_tokens: 500,
-        // Groq supports OpenAI-style JSON mode for this model -- it nudges
-        // the model to always return valid JSON. If you switch to a model
-        // that doesn't support it, just delete this line.
-        response_format: { type: 'json_object' }
+        response_format: { type: 'json_object' }  // helps Groq output pure JSON
       })
     });
 
@@ -104,7 +94,7 @@ Rules:
       return;
     }
 
-    // Strip markdown code fences if the model added them despite instructions.
+    // Strip any accidental markdown code fences
     let cleaned = rawText.trim();
     cleaned = cleaned.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
 
@@ -112,7 +102,7 @@ Rules:
     try {
       parsed = JSON.parse(cleaned);
     } catch (parseErr) {
-      // Fallback: try to pull out the first {...} block.
+      // Fallback: extract first {...} block
       const match = cleaned.match(/\{[\s\S]*\}/);
       if (match) {
         parsed = JSON.parse(match[0]);
@@ -121,22 +111,26 @@ Rules:
       }
     }
 
+    // Validate all fields, including the new "solution" field
     const valid = parsed &&
       typeof parsed.question === 'string' && parsed.question.trim() &&
       Array.isArray(parsed.options) && parsed.options.length === 4 &&
       parsed.options.every(o => typeof o === 'string' && o.trim()) &&
       typeof parsed.correct === 'number' &&
-      parsed.correct >= 0 && parsed.correct <= 3;
+      parsed.correct >= 0 && parsed.correct <= 3 &&
+      typeof parsed.solution === 'string' && parsed.solution.trim();   // ← NEW CHECK
 
     if (!valid) {
       res.status(502).json({ error: 'Groq returned an unexpected question format.' });
       return;
     }
 
+    // Return the full object with solution
     res.status(200).json({
       question: parsed.question,
       options: parsed.options,
-      correct: parsed.correct
+      correct: parsed.correct,
+      solution: parsed.solution   // ← NOW INCLUDED
     });
 
   } catch (err) {
